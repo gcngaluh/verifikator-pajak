@@ -8,56 +8,42 @@ class TaxEngine:
 
     def hitung_pajak_dari_bruto(self, gross, kategori, pph_rate, jenis_pph):
         """Menghitung pajak jika diketahui Nilai Kuitansi (Bruto)"""
-        
-        # Cek apakah nilai Kuitansi (Bruto) di bawah batas pemungutan PPN
         if gross <= self.batas_pemungutan:
-            dpp = gross  # Tanpa PPN, maka Bruto otomatis menjadi DPP
+            dpp = gross
             ppn = 0
-            
             if kategori == "Barang":
-                # Barang di bawah/sama dengan 2jt juga bebas PPh 22
                 pph = 0
                 jenis_pph_final = "Bebas PPh 22"
             else:
-                # Kategori Jasa & lainnya tetap dikenakan PPh walaupun di bawah 2jt
                 pph = dpp * pph_rate
                 jenis_pph_final = jenis_pph
-                
         else:
-            # Jika di atas 2 juta, PPN & PPh berlaku normal
             dpp = gross / (1 + self.ppn_rate)
             ppn = dpp * self.ppn_rate
             pph = dpp * pph_rate
             jenis_pph_final = jenis_pph
             
-        # Netto = Kuitansi - PPN - PPh
         netto = gross - ppn - pph
         return gross, dpp, ppn, pph, jenis_pph_final, netto
 
     def hitung_pajak_dari_netto(self, netto, kategori, pph_rate, jenis_pph):
         """Menghitung pajak dan Nilai Kuitansi (Gross-up) jika diketahui Netto"""
-        
-        # Tahap 1: Estimasi nilai Bruto seandainya TIDAK ada PPN
         if kategori == "Barang":
-            gross_estimasi = netto  # Barang <= 2jt bebas PPN & PPh
+            gross_estimasi = netto 
         else:
-            gross_estimasi = netto / (1 - pph_rate) # Jasa <= 2jt bebas PPN, tapi kena PPh
+            gross_estimasi = netto / (1 - pph_rate) 
             
-        # Tahap 2: Cek apakah estimasi Bruto tersebut masih di bawah batas 2 juta
         if gross_estimasi <= self.batas_pemungutan:
             gross = gross_estimasi
             dpp = gross
             ppn = 0
-            
             if kategori == "Barang":
                 pph = 0
                 jenis_pph_final = "Bebas PPh 22"
             else:
                 pph = dpp * pph_rate
                 jenis_pph_final = jenis_pph
-                
         else:
-            # Jika estimasi ternyata menembus 2 juta, gunakan rumus Gross-Up lengkap dengan PPN
             jenis_pph_final = jenis_pph
             gross = netto * (1 + self.ppn_rate) / (1 - pph_rate)
             dpp = gross / (1 + self.ppn_rate)
@@ -80,11 +66,39 @@ mode = st.sidebar.radio(
     ["Dari Nilai Kuitansi (Bruto)", "Dari Nilai Diterima (Netto)"]
 )
 
+# --- TRIK SESSION STATE UNTUK KOMA OTOMATIS ---
+# 1. Mengatur nilai default pertama kali aplikasi dimuat
+if "input_nominal" not in st.session_state:
+    st.session_state.input_nominal = "2,500,000"
+
+# 2. Fungsi yang dipanggil otomatis saat user selesai mengetik dan menekan Enter
+def format_input_koma():
+    raw_text = st.session_state.input_nominal
+    # Membersihkan semua input (termasuk titik/huruf) sehingga menyisakan murni angkanya saja
+    clean_text = ''.join(filter(str.isdigit, str(raw_text)))
+    
+    # Jika terdeteksi ada angka, format ulang dan selipkan koma ribuan
+    if clean_text:
+        st.session_state.input_nominal = f"{int(clean_text):,}"
+    else:
+        st.session_state.input_nominal = "0"
+
 st.sidebar.header("Input Data Transaksi")
-if mode == "Dari Nilai Kuitansi (Bruto)":
-    nilai_input = st.sidebar.number_input("Total Nilai Kuitansi (Rp)", min_value=0, step=1000, value=2500000)
-else:
-    nilai_input = st.sidebar.number_input("Nilai Diterima Vendor/Netto (Rp)", min_value=0, step=1000, value=2000000)
+
+# 3. Input dinamis yang terlihat seperti number_input tetapi mendukung auto-format
+label_teks = "Total Nilai Kuitansi (Rp)" if mode == "Dari Nilai Kuitansi (Bruto)" else "Nilai Diterima Vendor/Netto (Rp)"
+
+st.sidebar.text_input(
+    label=label_teks,
+    key="input_nominal",
+    on_change=format_input_koma
+)
+
+# 4. Ambil teks hasil inputan user, buang komanya di latar belakang agar bisa dihitung mesin
+try:
+    nilai_input = float(st.session_state.input_nominal.replace(",", ""))
+except ValueError:
+    nilai_input = 0.0
 
 kat_input = st.sidebar.selectbox("Kategori Belanja", [
     "Barang", 
@@ -100,7 +114,7 @@ kat_input = st.sidebar.selectbox("Kategori Belanja", [
 pph_rate = 0.0
 jenis_pph = ""
 kategori_engine = "Jasa"
-npwp_input = True # Default true untuk pajak final yang tidak terpengaruh NPWP
+npwp_input = True 
 
 # Menentukan tarif dan jenis PPh berdasarkan pilihan Kategori
 if kat_input == "Barang":
@@ -159,9 +173,9 @@ elif kat_input == "Input Manual / Lainnya":
     pph_rate = manual_rate / 100.0
     jenis_pph = f"PPh ({manual_rate}%)"
 
-submit = st.sidebar.button("Hitung Sekarang")
+submit = st.sidebar.button("Hitung Sekarang", disabled=(nilai_input <= 0))
 
-# Fungsi untuk memformat angka menjadi format Rupiah Indonesia (titik)
+# Fungsi untuk memformat angka menjadi format Rupiah Indonesia (titik) pada HASIL Output
 def format_rupiah(angka):
     return f"Rp {angka:,.0f}".replace(",", ".")
 
@@ -180,7 +194,6 @@ if submit:
     # Tampilan Hasil di Area Utama
     st.subheader("Hasil Analisis Pajak")
     
-    # Menampilkan angka dalam 4 kolom menggunakan st.info agar teks tidak terpotong (...)
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.info(f"**Nilai Kuitansi (Bruto)**\n### {format_rupiah(gross)}")
@@ -193,7 +206,7 @@ if submit:
     
     st.divider()
     
-    # Menampilkan Highlight Kesimpulan berdasarkan Mode
+    # Menampilkan Highlight Kesimpulan
     if mode == "Dari Nilai Kuitansi (Bruto)":
         st.success(f"### Nilai Bersih Diterima Vendor: {format_rupiah(netto)}")
         st.caption("*(Dihitung dari: Nilai Kuitansi - PPN - PPh)*")
@@ -205,20 +218,17 @@ if submit:
     with st.expander("Lihat Detail Aturan & Catatan"):
         st.write(f"1. Transaksi diklasifikasikan sebagai **{kat_input}** dengan tarif PPh sebesar **{pph_rate*100:g}%**.")
         
-        # Peringatan PPN & PPh jika Bruto <= 2 Juta
         if gross <= 2000000:
             if kategori_engine == "Barang":
                 st.info("Catatan: Karena nilai bruto ≤ Rp 2.000.000, maka tidak dipungut PPN & PPh 22 sesuai ketentuan bendahara pemerintah.")
             else:
                 st.info("Catatan: Karena nilai bruto ≤ Rp 2.000.000, maka tidak dipungut PPN. Namun, PPh atas jasa/sewa tetap dikenakan tanpa batas minimum.")
         
-        # Peringatan tidak ada NPWP
         if kat_input == "Barang" and not npwp_input and gross > 2000000:
             st.warning("Peringatan: Tarif PPh 22 dikenakan 100% lebih tinggi karena vendor tidak memiliki NPWP.")
         elif kat_input == "Jasa (PPh 23)" and not npwp_input:
             st.warning("Peringatan: Tarif PPh 23 dikenakan 100% lebih tinggi karena vendor tidak memiliki NPWP.")
 
-# Menambahkan menu Support Developer di posisi bawah
 st.divider()
 with st.expander("☕ Support Developer"):
     st.markdown("Jika aplikasi ini membantu mempercepat pekerjaan Anda, Anda dapat memberikan dukungan ke developer melalui QRIS di bawah ini:")
